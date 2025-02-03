@@ -32,5 +32,5 @@ setkey(direct_citations, citing_id, cited_id)
 
 # Save the data
 write_rds(documents, file.path(data_path, "documents.rds"), compress = "gz")
-write_rds(direct_citations[, .(citing_id, cited_id)], file.path(data_path, "direct_citations.rds"), compress = "gz")
+write_rds(direct_citations[, .(citing_id, cited_id)] %>% unique(), file.path(data_path, "direct_citations.rds"), compress = "gz")
 
