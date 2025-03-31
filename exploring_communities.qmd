@@ -1,0 +1,244 @@
+---
+title: "Exploring communities"
+author: "Aurélien Goutsmedt"
+format: 
+  html:
+    toc: true
+    number_sections: true
+    theme: journal
+    fig_caption: true
+    fig_align: center
+date: today
+date-format: long
+embed-resources: true
+lightbox: true
+execute:
+  echo: false
+  warning: false
+  message: false
+params:
+  method: "coupling_angle"
+  threshold: "1"
+  window: "5"
+  resolution: "0.6"
+---
+
+```{r}
+source("paths_and_packages.R")
+pacman::p_load(kableExtra,
+               tidytext)
+
+documents <- read_rds(file.path(data_path, "documents.rds"))
+nodes <- read_rds(file.path(data_path, "nodes.rds"))
+direct_citations <- read_rds(file.path(data_path, "direct_citations.rds"))
+direct_citations <- direct_citations[citing_id %in% nodes$citing_id & cited_id != "46698",]
+alluvial <- read_rds(file.path(data_path, glue("alluvial_{params$method}_{params$threshold}_{params$window}_{params$resolution}.rds")))
+alluvial[, citing_id := as.integer(citing_id)]
+```
+
+# Parameters used
+
+The following analysis is based on the following parameters:
+
+- Method to build the network: `r params$method`. The [coupling angle measure](https://agoutsmedt.github.io/biblionetwork/reference/biblio_coupling.html) takes into account the length of the bibliography of each node. The [coupling similarity measure](https://agoutsmedt.github.io/biblionetwork/reference/coupling_similarity.html) takes into account the length of the bibliography, but also the number of times a shared reference is cited in the whole corpus.
+- Threshold: `r params$threshold`. The threshold is used to filter the edges of the network. It is the minimum reference in common two nodes should have for the edge to be created. A lower threshold will create more edges between nodes (also likely increasing the number of nodes in the network as there will be less isolated nodes), but these edges may be less significant.
+- Window: `r params$window`. The window is the number of years used to build each network. A larger window means more stability between networks, and so fewer inter-temporal communities. For a 8-year window, two consecutive networks have more nodes in common (as the networks overlapped for 7 years).
+- Resolution: `r params$resolution`. The resolution is used to detect communities in the network. A higher resolution will create more communities, but these communities may be smaller and less stable over time.
+
+# General Overview
+
+Here is an overview of the inter-temporal communities. Each vertical bar represents a specific bibliographic coupling network built for a five-year window. Each community is represented on the vertical bars, in proportion of the number of nodes it gathers. The flows between the communities represent the number of nodes that move from one community to another in the next window. If a community is composed from a certain proportion of nodes from another community, we consider that they belong to the same inter-temporal community. 
+
+```{r}
+knitr::include_graphics(glue("pictures/alluvial_{params$method}_{params$threshold}_{params$window}_{params$resolution}.png"))
+```
+
+
+The following graph shows the number of nodes per network. The number of nodes increases strongly in the first networks, and then remain more or less stable.
+
+```{r}
+#| fig.cap="Number of nodes per network"
+
+number_nodes <- alluvial %>% 
+  count(window)
+
+ggplot(number_nodes, aes(x = window, y = n)) +
+  geom_point() +
+  labs(title = NULL,
+       x = NULL,
+       y = "Number of nodes") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+
+# Details on Communities
+
+The following section provides details on each community. The communities are extracted from the networks built with the coupling angle measure. 
+
+```{r}
+alluvial <- alluvial[share_cluster_max > 4,]
+
+# Listing communities
+nodes_in_communities <- alluvial %>% # list of nodes affiliations 
+  distinct(citing_id, cluster_label)
+
+list_communities <- alluvial %>% # Listing all communities in order of appearance
+  distinct(cluster_label, window) %>% 
+  mutate(first_year = str_extract(window, "^\\d{4}")) %>%
+  mutate(first_year = min(first_year), .by = cluster_label) %>% 
+  distinct(cluster_label, first_year) %>% 
+  arrange(first_year) %>% 
+  pull(cluster_label)
+
+# Calculating the number of citations
+cited_articles <- direct_citations %>% 
+  inner_join(nodes_in_communities, relationship = "many-to-many") %>% 
+  add_count(cited_id, cluster_label, name = "nb_cit") %>% 
+  distinct(cited_id, cluster_label, nb_cit) %>% 
+  filter(nb_cit > 1)
+
+# most_cited_nodes <- cited_articles %>% 
+#   filter(cited_id %in% nodes$citing_id) %>% 
+#   slice_max(order_by = nb_cit, n = 10, with_ties = FALSE, by = cluster_label) %>% 
+#   left_join(select(documents, cited_id = LLS_id, author_first, year, title, journal))
+
+most_cited_references <- cited_articles %>% 
+  # filter(! cited_id %in% nodes$citing_id) %>% 
+  slice_max(order_by = nb_cit, n = 10, with_ties = FALSE, by = cluster_label) %>% 
+  left_join(select(documents, cited_id = LLS_id, author_first, year, title, journal, abstract, doi)) %>%
+  select(cluster_label, author_first, year, title, journal, abstract, doi, nb_cit) %>% 
+  mutate(abstract = str_trunc(abstract, 500),
+         title = str_to_title(title),
+         author_first = str_to_title(author_first),
+         doi = str_c("[link](https://doi.org/", doi, ")"))
+
+# Finding the most identifying words
+tf_idf <- nodes %>% 
+  inner_join(nodes_in_communities, relationship = "many-to-many") %>% 
+  extract_tfidf(text_columns = c("title", "abstract"),
+                grouping_columns = "cluster_label",
+                clean_word_method = "lemmatise",
+                n_gram = 3,
+                nb_terms = 15) %>% 
+  inner_join(distinct(alluvial, cluster_label, color)) 
+
+# Calculating degree per nodes
+central_nodes <- alluvial %>% 
+  mutate(eigenvector_centrality = mean(eigenvector_centrality), .by = c(citing_id, cluster_label, window)) %>% 
+  left_join(select(documents, citing_id = LLS_id, author_first, year, title, journal, abstract, doi)) %>% 
+  distinct(cluster_label, author_first, year, title, journal, abstract, doi, eigenvector_centrality) %>% 
+  slice_max(order_by = eigenvector_centrality, n = 10, with_ties = FALSE, by = cluster_label) %>% 
+  mutate(abstract = str_trunc(abstract, 500),
+         title = str_to_title(title),
+         author_first = str_to_title(author_first),
+         doi = str_c("[link](https://doi.org/", doi, ")"))
+      
+high_clustering <- alluvial %>% 
+  mutate(participation_coefficient = mean(participation_coefficient), .by = c(citing_id, cluster_label, window)) %>%
+  left_join(select(documents, citing_id = LLS_id, author_first, year, title, journal, abstract, doi)) %>% 
+  distinct(cluster_label, author_first, year, title, journal, abstract, doi, participation_coefficient) %>% 
+  slice_min(order_by = participation_coefficient, n = 5, with_ties = FALSE, by = cluster_label) %>% 
+  mutate(abstract = str_trunc(abstract, 500),
+         title = str_to_title(title),
+         author_first = str_to_title(author_first),
+         doi = str_c("[link](https://doi.org/", doi, ")"))
+```
+
+```{r}
+#| results='asis'
+time_window <- window
+for (com in list_communities) {
+  ####################### Preparing the data to put in the template
+alluv_com <- alluvial[cluster_label == com,]  
+# extracting the first year and last year of the community
+window <- c(first(unique(alluv_com$window)) %>% str_extract("^\\d{4}"), 
+            last(unique(alluv_com$window)) %>% str_extract("\\d{4}$"))
+
+main_journals <- alluv_com %>% 
+  select(citing_id) %>% 
+  inner_join(documents, by = c("citing_id" = "LLS_id")) %>%
+  count(journal) %>% 
+  slice_max(order_by = n, n = 5, with_ties = FALSE)
+
+main_areas <- alluv_com %>% 
+  select(citing_id) %>% 
+  inner_join(documents, by = c("citing_id" = "LLS_id")) %>%
+  separate_longer_delim(subject_areas, delim = ",") %>% 
+  mutate(subject_areas = str_remove_all(subject_areas, '\\"') %>% str_trim()) %>%
+  count(subject_areas) %>% 
+  slice_max(order_by = n, n = 5, with_ties = FALSE)
+
+main_keywords <- alluv_com %>% 
+  select(citing_id) %>% 
+  inner_join(documents, by = c("citing_id" = "LLS_id")) %>%
+  separate_longer_delim(keywords, delim = ",") %>% 
+  filter(! is.na(keywords)) %>% 
+  mutate(keywords = str_remove_all(keywords, '\\"') %>% str_trim()) %>%
+  count(keywords) %>% 
+  slice_max(order_by = n, n = 5, with_ties = FALSE)
+
+################ Beginning of the template ######################
+cat(sprintf("  \n## Community _%s_ \n\n", com))
+cat(paste0("  \nThe community exists from ", window[1]," to ", window[2],". \n"))
+cat(paste0("  \nThe community gathers ",length(unique(alluv_com$citing_id))," unique articles from our corpus (",round(length(unique(alluv_com$citing_id))/length(unique(alluvial$citing_id))*100,2),"% of the corpus). The nodes of the community represents ", round(unique(alluv_com$share_cluster_alluv),2), "% of all nodes across all networks. In the five-year window when its share in the network is the biggest, it represents ", round(unique(alluv_com$share_cluster_max),2), "% of the corresponding five-year network. \n"))  
+cat(paste0("  \nThe five journals with the highest number of articles in this community are ",paste0(main_journals$journal," (",main_journals$n,")", collapse = ", "),". \n"))
+cat(paste0("  \nThe five most recurrent 'subject areas' are '",paste0(main_areas$subject_areas,"' (",main_areas$n,")", collapse = ", '"),". \n"))
+cat(paste0("  \nThe five most recurrent 'keywords' are '",paste0(main_keywords$keywords,"' (",main_keywords$n,")", collapse = ", '"),". \n"))
+
+
+# Most cited references
+  cat("  \n### Most cited references by the community\n\n")
+  cat("In the next table, you will find the ten references that are the most cited by the community")
+  
+   print(kbl(most_cited_references[cluster_label == com, -c("cluster_label")],
+            col.names = c("First Author","Year","Title","Journal", "Abstract", "Link", "Citations")) %>% 
+  kable_styling(bootstrap_options = c("striped","condensed"),
+                font_size = 10)) %>% 
+     print()
+
+  
+# TF-IDF
+     cat("  \n### Terms with the highest TF-IDF value\n\n")
+     cat(paste0("  \nWe have extracted all the terms (unigrams, bigrams and trigram, that is one word, two or three words) in the title of all the community articles. We display here the 15 terms which indentify the most this particular community, in comparison to the other communities.\n\n"))
+plot(ggplot(tf_idf[cluster_label == com], 
+            aes(reorder_within(term, tf_idf, color), tf_idf, fill = color)) +
+    geom_bar(stat = "identity", alpha = .8, show.legend = FALSE) +
+    labs(
+      title = "Highest tf-idf",
+      x = "Words", y = "tf-idf"
+    ) +
+    scale_fill_identity() +
+    scale_x_reordered() +
+    coord_flip() +
+    theme_minimal())
+cat("\n\n")
+
+# Central nodes
+cat("  \n### Most central nodes \n\n")
+cat("The following table displays the nodes that have the highest eigenvector centrality in the community. Eigenvector centrality assigns each node a score based on the importance of its neighbors. The higher the score, the more representative of the community the node is. \n")
+
+central_nodes %>% 
+  filter(cluster_label == com) %>% 
+  select(-cluster_label) %>% 
+  kbl(col.names = c("Author","Year","Title","Journal", "Abstract", "Link", "Eigenvector Centrality")) %>% 
+  kable_styling(bootstrap_options = c("striped","condensed"),
+                font_size = 10) %>% 
+  print()
+
+# Low participation coefficient
+cat("  \n### Nodes identifying commuities \n\n")
+cat("The following table displays the nodes that have the lowest participation coefficient in the community. The participation coefficient is a measure used in network analysis to quantify how evenly a node's connections are distributed across different communities in a network. It helps identify whether a node's connections are concentrated within its own community or spread across multiple communities. A score closer to 0 means a node is connected above all with its own community, meaning it is more representative of the community.\n")
+
+high_clustering %>% 
+  filter(cluster_label == com) %>%
+  select(-cluster_label) %>% 
+  kbl(col.names = c("Author","Year","Title","Journal", "Abstract", "Link", "Participation Coefficient")) %>% 
+  kable_styling(bootstrap_options = c("striped","condensed"),
+                font_size = 10) %>% 
+  print()
+}
+
+
+```
+
