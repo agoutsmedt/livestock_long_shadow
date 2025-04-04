@@ -3,13 +3,13 @@
 source("paths_and_packages.R")
 
 # Load data
-documents <- read_rds(file.path(data_path, "documents.rds"))
+nodes <- read_rds(file.path(data_path, "documents.rds")) %>% 
+  .[level_1 == TRUE]
 direct_citations <- read_rds(file.path(data_path, "direct_citations.rds"))
 
 # Creating nodes and direct_citations files
 
 # Id of livestock report : "46698"
-nodes <- documents[level_1 == TRUE,]
 setnames(nodes, "LLS_id", "citing_id")
 nodes[, cited_id := citing_id]
 nodes[, year := as.integer(year)]
@@ -27,7 +27,7 @@ for (i in 1:nrow(grid)) {
   threshold <- grid$thresholds[i]
   resolution <- grid$resolutions[i]
   window <- grid$windows[i]
-  source("creating_networks.R")
+  #source("creating_networks.R")
   quarto::quarto_render("exploring_communities.qmd",
                         output_file = glue("exploring_communities_{method}_{threshold}_{resolution}_{window}.html"),
                         execute_params = list(method = grid$methods[i],

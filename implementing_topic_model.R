@@ -1,6 +1,7 @@
 # Preparing and running the topic model
 # Loading packages and data------------------------
 source("paths_and_packages.R")
+source("helper_functions.R")
 p_load(tokenizers,
        tidytext,
        tidyfast,
@@ -8,7 +9,9 @@ p_load(tokenizers,
        stm)
 
 # Load data
-documents <- read_rds(file.path(data_path, "documents.rds")) 
+documents <- read_rds(file.path(data_path, "documents.rds")) %>% 
+  .[level_1 == TRUE]
+documents[, year := as.numeric(year)]
 text <- documents[level_1 == TRUE, .(LLS_id, abstract)] %>% # keeping only articles that cite Livestock report
   unique()
 text <- text[, token := tokenize_words(abstract, 
@@ -32,8 +35,8 @@ text <- text[!token %in% stop_words]
 text[, token := stri_trans_general(token, id = "Latin-ASCII")] # remove accents
 text[, token := str_remove_all(token, "'s")]
 text <- text[!(str_detect(token, "^\\d") & !str_detect(token, "th$|nd$|\\ds$")) & !str_detect(token, "^[^\\p{Latin}]+$") ]  # removing most pattern with digits and latin characters
-
-
+text[, token := textstem::lemmatize_words(token)]
+       
 ## Creating a list of bigrams and trigrams--------------------------
 # Create bigrams and tigrams
 text <- text[order(LLS_id, token_id)]  # Ensure correct order
@@ -49,7 +52,7 @@ text[, trigram := ifelse(token_id + 1 == shift(token_id, type = "lead") & token_
 ### Calculate PMI values for bigrams---------------------
 # filter na and count bigrams, keep only bigrams that appear more than 10 times
 bigram_counts <- text[!is.na(bigram), .N, by = .(bigram)]
-bigram_counts <- bigram_counts[N > 10]  
+bigram_counts <- bigram_counts[N > 4]  
 
 # Split bigram into word_1 and word_2
 bigram_counts[, c("word_1", "word_2") := tstrsplit(bigram, "_", fixed = TRUE)]
@@ -63,7 +66,7 @@ word_prob[, prob := N / length(text$token)]
 
 #Count occurrences of each bigram
 bigram_prob <- text[!is.na(bigram), .N, by = bigram]
-bigram_prob[, prob_bigram := N /nrow(text[!is.na(bigram)])]
+bigram_prob[, prob_bigram := N /(length(text$token))]
 
 # Merge word_1 and word_2 probabilities into bigram table and rename
 bigram_counts <- merge(bigram_counts, word_prob[, .(token, prob_word_1 = prob)], by.x = "word_1", by.y = "token", all.x = TRUE)
@@ -81,14 +84,14 @@ bigram_counts[pmi > median(pmi), keep_bigram := TRUE]
 ### Calculate PMI values for trigrams---------------------
 # Filter and count trigrams, keep only trigrams appearing more than 10 times
 trigram_counts <- text[!is.na(trigram), .N, by = .(trigram)]
-trigram_counts <- trigram_counts[N > 5]
+trigram_counts <- trigram_counts[N > 4]
 
 # Split trigram into word_1, word_2, and word_3
 trigram_counts[, c("word_1", "word_2", "word_3") := tstrsplit(trigram, "_", fixed = TRUE)]
 
 # Count occurrences of each trigram
 trigram_prob <- text[!is.na(trigram), .N, by = trigram]
-trigram_prob[, prob_trigram := N / nrow(text[!is.na(trigram)])]
+trigram_prob[, prob_trigram := N / (length(text$token))]
 
 # Merge word probabilities into trigram table
 trigram_counts <- merge(trigram_counts, word_prob[, .(token, prob_word_1 = prob)], by.x = "word_1", by.y = "token", all.x = TRUE)
@@ -117,16 +120,48 @@ text[, token := ifelse(keep_trigram, trigram, token)] # trigram in second as we 
 text[, new_token := ifelse((shift(keep_trigram, type = "lag") == TRUE | shift(keep_trigram, n = 2, type = "lag") == TRUE | shift(keep_bigram, type = "lag") == TRUE), "", token)]
 text[, token := ifelse(!is.na(new_token), new_token, token)] # We do that only to take back the problems with the lag of two above (missing first two words)
 text <- text[token != "", .(LLS_id, token)]
+text[, n_word := .N, by = .(LLS_id, token)]
 
 # Running the topic model-------------------------------
 
 ## Preparing the data for the topic model
 # Later: preparing different thresholds for the number of words
-text <- text[token %in% text[, .N, by = token][N > 10]$token,]
-text[, n_word := .N, by = .(LLS_id, token)]
-corpus_in_dfm <- text %>% 
-  cast_dfm(LLS_id, token, n_word)
-metadata <- documents[LLS_id %in% unique(text$LLS_id), .(LLS_id, year, title, author_first, journal, abstract)] %>% 
-  unique()
 
-corpus_in_stm <- quanteda::convert(corpus_in_dfm, to = "stm",  docvars = metadata)
+thresholds <- c(5, 10, 20)
+corpora_in_dfm <- vector(mode = "list", length = length(thresholds))
+names(corpora_in_dfm) <- as.character(thresholds)
+for(threshold in thresholds){
+  corpus_in_dfm <- text %>% 
+    .[token %in% text[, .N, by = token][N > threshold]$token,] %>% 
+    cast_dfm(LLS_id, token, n_word)
+  metadata <- documents[LLS_id %in% unique(text$LLS_id), .(LLS_id, year, title, author_first, journal, abstract)] %>%
+    unique()
+  
+  corpora_in_dfm[[paste(threshold)]] <- quanteda::convert(corpus_in_dfm, to = "stm",  docvars = metadata)
+}
+write_rds(corpora_in_dfm, here::here(data_path, "topic_modelling", "corpora.rds"), compress = "gz")
+
+rstudioapi::jobRunScript("background_topic_model.R",
+                         importEnv = TRUE,
+                         exportEnv = "R_GlobalEnv")
+
+# Evaluating the different topic models-------------------
+many_stm <- read_rds(here::here(data_path, "topic_modelling", "many_stm.rds"))
+
+# estimate exclusivity and coherence 
+setDT(many_stm)
+# unnest corpus_in_stm by K 
+many_stm[, corpus_in_stm := corpora_in_dfm, by = K]
+
+# many_stm[, heldout := future_map(corpus_in_stm, ~ make.heldout(.x$documents, .x$vocab))]
+many_stm[, exclusivity := map(models, exclusivity)]
+many_stm[, exclusivity := map_dbl(exclusivity, mean)]
+many_stm[, semantic_coherence := map2(models, corpus_in_stm, ~ semanticCoherence(.x, .y$documents))]
+many_stm[, semantic_coherence := map_dbl(semantic_coherence, mean)]
+many_stm[, heldout := map(corpus_in_stm, ~ make.heldout(.x$documents, .x$vocab))]
+many_stm[, heldout_likelihood := map2_dbl(models, heldout, ~ eval.heldout(.x, .y$missing)$expected.heldout)]
+many_stm[, residual := map2(models, corpus_in_stm, ~checkResiduals(.x, .y$documents))]
+many_stm[, residual := map_dbl(residual, "dispersion")]
+many_stm[, lbound := map_dbl(models, function(x) max(x$convergence$bound) + lfactorial(x$settings$dim$K))]
+
+plots <- plot_topicmodels_stat(many_stm)

@@ -17,9 +17,9 @@ execute:
   warning: false
   message: false
 params:
-  method: "coupling_angle"
-  threshold: "1"
-  window: "5"
+  method: "coupling_similarity"
+  threshold: "2"
+  window: "8"
   resolution: "0.6"
 ---
 
@@ -34,7 +34,78 @@ direct_citations <- read_rds(file.path(data_path, "direct_citations.rds"))
 direct_citations <- direct_citations[citing_id %in% nodes$citing_id & cited_id != "46698",]
 alluvial <- read_rds(file.path(data_path, glue("alluvial_{params$method}_{params$threshold}_{params$window}_{params$resolution}.rds")))
 alluvial[, citing_id := as.integer(citing_id)]
+
+# Loading topic modelling data data
+topic_model <- read_rds(here::here(data_path, "topic_modelling", "many_stm.rds")) %>% 
+  filter(K == 40 & word_threshold == "20") %>% 
+  pull(models) %>% 
+  pluck(1)
+
+corpus <- read_rds(here::here(data_path, "topic_modelling", "corpora.rds")) %>% 
+  .[["20"]]
+
+metadata <- corpus$meta %>% 
+  as_tibble() %>%
+  mutate(document = row_number())
 ```
+
+## General Overview of Topic Modelling
+
+We run topic modelling on the whole corpus of publications citing the *Livestock Long Shadow* report. Our corpus of publications is composed of abstracts (we don't use the titles). We search for laten thematics (the topics) in this set of abstracts. We have to decide the number of topics we want to extract. We choose to extract 40 topics after observation of different stastitical metrics and a look at the interpretability of the topics. 
+
+For each topic, we can extract the words the most representative of the topic. We can use the beta values, which are the probabilities of each word to be associated with a topic. The higher the beta value, the more representative the word is for the topic.
+
+![](pictures/beta_topics.png)
+
+We can also use the frex values, which are the probabilities of each word to be associated with a topic, but taking into account its association to other topics. In other words, a word has a high frex value if it is very representative of a topic, but not very representative of other topics. 
+
+![](pictures/frex_topics.png)
+
+Then, we can look at the general prevalence of each topic: what is the proportion of a topic in our corpus? Here, the name of a topic corresponds to the five words with the highest beta value.
+
+![](pictures/stm_prevalence_beta.png)
+
+We can also look at the impact of metadata on topics prevalence. How the year of publication affect the prevalence of topics? For each topic and document, we estimate the following model:
+$$\theta_{d,k}=\beta_0 + \beta_1*year_d$$
+where $\theta_{d,k}$ is the prevalence of topic $k$ in document $d$, and $\beta_0$ and $\beta_1$ are the coefficients to estimate. We apply a b-spline transformation to the year of publication to capture non-linear effects. We can calculate the estimated prevalence of a topic for each year of publication:
+
+![](pictures/topic_per_year.png)
+
+Eventually, It is also possible to look at the correlation between the topics by building a network. This networks allows to see which topics are often associated with each other. The edges of the network are weighted by the correlation between two topics.
+
+```{r}
+library(ggraph)
+library(ggiraph)
+graph_layout <- read_rds(here::here(data_path, "topic_modelling", "graph_layout.rds"))
+
+gg <- ggraph(graph_layout, 
+             "manual", 
+             x = x, 
+             y = y) +
+  geom_edge_arc0(aes(
+    # color = cluster_leiden,
+    width = weight), 
+    alpha = 0.1, strength = 0.2, show.legend = FALSE) +
+  scale_edge_width_continuous(range = c(0.1,0.3)) +
+  # scale_edge_colour_identity() +
+  geom_point(aes(x = x, y = y), show.legend = FALSE) +
+  geom_label_repel_interactive(aes(x = x, 
+                                   y = y, 
+                                   size = gamma,
+                                   label = source_id,
+                                   tooltip = topic_label_prob,
+                                   data_id = source_id),
+                               show.legend = FALSE) +
+  scale_size_continuous(range = c(0.5,5)) +
+  # scale_fill_identity() +
+  theme_void()
+
+girafe(ggobj = gg,
+       width_svg  = 8,
+       height_svg = 4.5)
+```
+
+## Bibliographic Coupling
 
 # Parameters used
 
@@ -143,6 +214,25 @@ high_clustering <- alluvial %>%
          title = str_to_title(title),
          author_first = str_to_title(author_first),
          doi = str_c("[link](https://doi.org/", doi, ")"))
+
+# Mapping topic models and communities
+label_topic <- tidy(topic_model, matrix = "beta") %>% 
+  slice_max(beta, n = 5, with_ties = FALSE, by = topic) %>% 
+  mutate(label_beta = paste0("Topic ", topic, ": ", paste0(term, collapse = ", ")), .by = topic) %>% 
+  distinct(topic, label_beta)
+gamma <- tidy(topic_model,
+              matrix = "gamma") %>% 
+  left_join(metadata, by = "document") %>% 
+  left_join(label_topic, by = "topic") %>%
+  rename(citing_id = LLS_id)
+
+top_topics <- alluvial %>% 
+  select(cluster_label, citing_id) %>% 
+  unique() %>% 
+  left_join(gamma, by = "citing_id", relationship = "many-to-many") %>% 
+  mutate(mean_gamma = mean(gamma), .by = c(cluster_label, topic)) %>% 
+  distinct(cluster_label, label_beta, mean_gamma)
+
 ```
 
 ```{r}
@@ -189,13 +279,13 @@ cat(paste0("  \nThe five most recurrent 'keywords' are '",paste0(main_keywords$k
 
 # Most cited references
   cat("  \n### Most cited references by the community\n\n")
-  cat("In the next table, you will find the ten references that are the most cited by the community")
+  cat("In the next table, you will find the ten references that are the most cited by the community.")
   
-   print(kbl(most_cited_references[cluster_label == com, -c("cluster_label")],
-            col.names = c("First Author","Year","Title","Journal", "Abstract", "Link", "Citations")) %>% 
-  kable_styling(bootstrap_options = c("striped","condensed"),
-                font_size = 10)) %>% 
-     print()
+  most_cited_references[cluster_label == com, -c("cluster_label")] %>% 
+    kbl(col.names = c("First Author","Year","Title","Journal", "Abstract", "Link", "Citations")) %>% 
+    kable_styling(bootstrap_options = c("striped","condensed"),
+                  font_size = 10) %>% 
+    print()
 
   
 # TF-IDF
@@ -227,7 +317,7 @@ central_nodes %>%
   print()
 
 # Low participation coefficient
-cat("  \n### Nodes identifying commuities \n\n")
+cat("  \n### Nodes identifying communities \n\n")
 cat("The following table displays the nodes that have the lowest participation coefficient in the community. The participation coefficient is a measure used in network analysis to quantify how evenly a node's connections are distributed across different communities in a network. It helps identify whether a node's connections are concentrated within its own community or spread across multiple communities. A score closer to 0 means a node is connected above all with its own community, meaning it is more representative of the community.\n")
 
 high_clustering %>% 
@@ -237,8 +327,20 @@ high_clustering %>%
   kable_styling(bootstrap_options = c("striped","condensed"),
                 font_size = 10) %>% 
   print()
+
+# Main topics by community
+cat("  \n### Main topics by community \n\n")
+cat("The following table displays the topics with the highest prevalence in the community. The prevalence of a topic is the probability to find the topic in the articles of the community. \n")
+
+top_topics %>% 
+  filter(cluster_label == com) %>%
+  slice_max(order_by = mean_gamma, n = 5, with_ties = FALSE, by = cluster_label) %>%
+  mutate(mean_gamma = round(mean_gamma, 2)) %>% 
+  select(-cluster_label) %>% 
+  kbl(col.names = c("Topic","Prevalence")) %>% 
+  kable_styling(bootstrap_options = c("striped","condensed"),
+                font_size = 10) %>% 
+  print()
 }
 
-
 ```
-

@@ -1,12 +1,21 @@
-data_path <- "~/Nextcloud/Research/R/projets/data/lls_data"
+data_path <- "~/Nextcloud/Research/data/lls_data"
 library(pacman)
 p_load(tidyverse,
        data.table,
        tidygraph,
        glue)
 
-remotes::install_github("agoutsmedt/networkflow")
+if("networkflow" %in% rownames(installed.packages()) == FALSE) {
+  remotes::install_github("agoutsmedt/networkflow")
+}
+if ("vite" %in% rownames(installed.packages()) == FALSE) {
+  devtools::install_github("ParkerICI/vite")
+}
 pacman::p_load(networkflow)
+#      
+
 
 # Number of threads used with data.table in percentage of total CPU
 setDTthreads(percent = 70)
+
+figures_path <- here::here("pictures")
