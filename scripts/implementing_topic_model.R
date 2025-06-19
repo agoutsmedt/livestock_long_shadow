@@ -1,7 +1,7 @@
 # Preparing and running the topic model
 # Loading packages and data------------------------
-source("paths_and_packages.R")
-source("helper_functions.R")
+source("scripts/paths_and_packages.R")
+source("scripts/helper_functions.R")
 p_load(tokenizers,
        tidytext,
        tidyfast,

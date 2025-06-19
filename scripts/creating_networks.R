@@ -75,7 +75,7 @@ plot_alluvial <- alluvial_prepared %>%
   labs(y = "Proportion of the network",
        x = NULL)
 
-ggsave(glue("pictures/alluvial_{method}_{threshold}_{window}_{resolution}.png"), plot_alluvial, width = 30, height = 20)  
+ggsave(glue("pictures/alluvial_round2_{method}_{threshold}_{window}_{resolution}.png"), plot_alluvial, width = 30, height = 20)  
 
 # Adding data on nodes centrality
 cli::cli_alert_info("Adding data on nodes centrality and participation coefficient")
@@ -109,5 +109,5 @@ alluvial_prepared <- alluvial_prepared %>%
   left_join(centrality_data, by = c("citing_id", "window")) %>% 
   left_join(participation_coefficient, by = c("citing_id", "window"))
 
-saveRDS(alluvial_prepared, file.path(data_path, glue("alluvial_{method}_{threshold}_{window}_{resolution}.rds")))
+saveRDS(alluvial_prepared, file.path(data_path, glue("alluvial_round2_{method}_{threshold}_{window}_{resolution}.rds")))
 
