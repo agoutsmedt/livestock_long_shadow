@@ -242,6 +242,9 @@ kmeans_result <- kmeans(topic_coords[, 1:40], centers = k, nstart = 100, iter.ma
 # Add cluster info to data
 topic_coords$cluster <- as.factor(kmeans_result$cluster)
 
+if(k == 4) saveRDS(select(topic_coords, topic, label_beta, cluster), 
+                   here::here(data_path, "topic_modelling", "kmeans_4_clusters.rds"))
+
 if(k == 2){
   color_order <- c(5, 6)
 } else {

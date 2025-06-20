@@ -1,6 +1,5 @@
 ---
 title: "Exploring communities"
-author: "Aurélien Goutsmedt"
 format: 
   html:
     toc: true
