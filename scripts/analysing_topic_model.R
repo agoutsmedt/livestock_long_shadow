@@ -1,13 +1,41 @@
-# Preparing and running the topic model
-# Loading packages and data------------------------
-source("scripts/paths_and_packages.R")
-source("scripts/helper_functions.R")
-p_load(ggraph, ggiraph, stm, tidytext)
+#: Tutorial ---------
+# This script analyses a previously fitted Structural Topic Model (STM).
+# Script goals:
+# - Load an STM object and its supporting corpus/metadata
+# - Summarise topics (top terms by beta and frex), prevalence and correlations
+# - Produce visual outputs (prevalence plots, topic-word plots, PCA and clustering)
+# - Explore associations between STM clusters and bibliographic communities
+#
+# Setup Instructions:
+# - Ensure the project root is set (this script uses `here::here()` and paths defined
+#   in `scripts/paths_and_packages.R`).
+# - Required packages: tidyverse, stm, tidystm (from GitHub), tidytext, ggraph,
+#   ggiraph, tidygraph, vite, scico, janitor, readxl, cluster, ggrepel, glue, reshape2.
+# - `scripts/paths_and_packages.R` should set `data_path` and `figures_path` variables.
+#
+# How it works (high-level):
+# 1. Load helper scripts and packages, then load the saved STM object and corpus.
+# 2. Extract tidy summaries for beta, frex and gamma matrices and join topic labels.
+# 3. Create prevalence plots (beta/frex labelling), topic-term plots and save PNGs.
+# 4. Compute topic correlations and a force-directed layout for network visualisation.
+# 5. Run PCA on topic prevalence matrix, then k-means clustering on PCA scores.
+# 6. Compare STM clusters with bibliographic community labels via an association heatmap.
+# 7. Estimate topic effects (e.g., over time) and plot topic prevalence trajectories.
+#
+#: Setup ---------
+source("scripts/paths_and_packages.R") # sets data_path, figures_path, etc.
+source("scripts/helper_functions.R") # project helper functions
+
+# Load packages used in this script. p_load is from pacman (called in paths_and_packages.R)
+p_load(ggraph, ggiraph, stm, tidytext, cluster)
+# tidystm is on GitHub and is only installed if missing
 if ("tidystm" %notin% installed.packages()) {
   devtools::install_github("mikajoh/tidystm", dependencies = TRUE)
 }
 
-# Loading data
+#: Load data ---------
+# Load the pre-fitted STM object. The original code filters a many-models object
+# and selects the model with K == 40 and word_threshold == "20". We preserve that.
 topic_model <- read_rds(here::here(
   data_path,
   "topic_modelling",
@@ -17,18 +45,24 @@ topic_model <- read_rds(here::here(
   pull(models) %>%
   pluck(1)
 
+# Load the corpus used to fit the model. We select the element named "20".
 corpus <- read_rds(here::here(data_path, "topic_modelling", "corpora.rds"))[[
   "20"
 ]]
 
+# Metadata: convert corpus meta to a tibble and add a document id column
 metadata <- corpus$meta %>%
   as_tibble() %>%
   mutate(document = row_number())
 
-# Working with the chosen topic model: basic description-----------
-## Extracting statistics---------------------------
+
+#: Topic summaries ---------
+# Extract tidy matrices from the fitted STM: beta (topic-term), frex (alternative ranking), gamma (doc-topic)
 beta <- tidy(topic_model, matrix = "beta")
 frex <- tidy(topic_model, matrix = "frex")
+
+# Create short labels for topics using the top terms by beta and by frex.
+# These labels are handy for plotting and interpreting topics.
 label_topic_beta <- beta %>%
   slice_max(beta, n = 5, with_ties = FALSE, by = topic) %>%
   mutate(
@@ -36,6 +70,7 @@ label_topic_beta <- beta %>%
     .by = topic
   ) %>%
   distinct(topic, label_beta)
+
 label_topic_frex <- frex %>%
   slice(1:5, .by = topic) %>%
   mutate(
@@ -44,18 +79,22 @@ label_topic_frex <- frex %>%
   ) %>%
   distinct(topic, label_frex)
 
+# Gamma: document-topic proportions with topic labels joined
 gamma <- tidy(topic_model, matrix = "gamma") %>%
   left_join(metadata, by = "document") %>%
   left_join(label_topic_beta, by = "topic") %>%
   left_join(label_topic_frex, by = "topic")
 
-## Looking at prevalence-----------------------------
+
+#: Prevalence plots ---------
+# Compute mean topic prevalence across documents and reorder topics by prevalence.
 gamma_mean <- gamma %>%
   group_by(topic, label_beta, label_frex) %>%
   summarise(gamma = mean(gamma)) %>%
   ungroup %>%
   mutate(topic = reorder(topic, gamma))
 
+# Prevalence plot labelled with beta-top terms
 prevalence_beta <- gamma_mean %>%
   ggplot() +
   geom_segment(
@@ -76,7 +115,7 @@ prevalence_beta <- gamma_mean %>%
   theme_light() +
   theme(
     text = element_text(size = 20),
-    axis.text.y = element_blank(), # Removes y-axis text
+    axis.text.y = element_blank(), # removes y-axis labels
     axis.ticks.y = element_blank()
   ) +
   labs(
@@ -95,6 +134,7 @@ ggsave(
   dpi = 300
 )
 
+# Prevalence plot labelled with frex-top terms
 prevalence_frex <- gamma_mean %>%
   ggplot() +
   geom_segment(
@@ -115,7 +155,7 @@ prevalence_frex <- gamma_mean %>%
   theme_light() +
   theme(
     text = element_text(size = 20),
-    axis.text.y = element_blank(), # Removes y-axis text
+    axis.text.y = element_blank(), # removes y-axis labels
     axis.ticks.y = element_blank()
   ) +
   labs(
@@ -134,7 +174,9 @@ ggsave(
   dpi = 300
 )
 
-## Looking at topics description----------------
+
+#: Topic-term plots ---------
+# Plot top terms per topic using beta (probability of term in topic)
 plot_beta <- beta %>%
   slice_max(beta, n = 10, with_ties = FALSE, by = topic) %>%
   mutate(
@@ -158,6 +200,10 @@ ggsave(
   dpi = 300
 )
 
+# Calculate frex (alternative weighting) and plot top frex terms.
+# Note: the script originally assigns to `frex` earlier (tidy frex matrix) and
+# here `frex` is redefined using calculate_frex(). We keep the original behaviour
+# to avoid changing script logic.
 frex <- calculate_frex(topic_model, nb_terms = 10, w = 0.5)
 plot_frex <- frex %>%
   mutate(
@@ -174,22 +220,23 @@ plot_frex <- frex %>%
 ggsave(
   "frex_topics.png",
   device = "png",
-  plot = plot_beta,
+  plot = plot_frex,
   path = figures_path,
   width = 18,
   height = 14,
   dpi = 300
 )
 
-## Looking at correlations between topics----------------
 
-### Network methods--------------
-corr <- stm::topicCorr(topic_model, cutoff = 0.001)
+#: Topic correlations & network layout ---------
+# Compute topic correlations (used for visual network representations)
+corr <- topicCorr(topic_model, cutoff = 0.001)
 
-# matrix to table
+# Convert correlation matrix to edge table
 corr_table <- reshape2::melt(corr$cor)
 label_topic <- labelTopics(topic_model, n = 10)
 
+# Nodes: compact label for each topic (first element from label_topic)
 nodes <- label_topic[[1]] %>%
   as_tibble() %>%
   reframe(topic_label_prob = pmap_chr(., ~ paste(c(...), collapse = ", "))) %>%
@@ -202,14 +249,15 @@ edges <- corr_table %>%
 
 graph <- tidygraph::tbl_graph(nodes = nodes, edges = edges, directed = FALSE)
 
-# fa 2
+# Use force-atlas2 layout via vite. This is computationally intensive; result is saved.
 graph_layout <- vite::complete_forceatlas2(graph, first.iter = 50000, kgrav = 1)
 write_rds(
   graph_layout,
   here::here(data_path, "topic_modelling", "graph_layout.rds")
 )
 
-## PCA------
+#: PCA and clustering ---------
+# Build a topic x document matrix (rows = topics, columns = documents) for PCA
 topic_vectors <- gamma %>%
   select(label_beta, document, gamma) %>%
   pivot_wider(names_from = document, values_from = gamma) %>%
@@ -218,10 +266,8 @@ topic_vectors <- gamma %>%
 
 pca_result <- prcomp(topic_vectors, scale. = TRUE)
 
-# Squared standard deviations of the components
+# Variance explained by each principal component
 pca_var <- pca_result$sdev^2
-
-# Proportion of variance for each PC
 pca_var_explained <- pca_var / sum(pca_var)
 
 plot(
@@ -232,20 +278,18 @@ plot(
   main = "Scree Plot"
 )
 
-# Get PCA coordinates for topics
+# PCA coordinates for topics (we keep up to 40 components as in original script)
 topic_coords <- as.data.frame(pca_result$x[, 1:40])
 topic_coords$label_beta <- rownames(topic_coords)
+topic_coords <- topic_coords %>% left_join(gamma_mean)
 
-topic_coords <- topic_coords %>%
-  left_join(gamma_mean)
 
-#### K-means clustering on PCA scores----------------
+##: K-means clustering on PCA scores----------------
 set.seed(123)
-p_load(cluster)
-
 avg_silhouette <- function(k, data, runs = 100) {
+  # Estimate average silhouette score across multiple kmeans initialisations
   scores <- numeric(runs)
-  for (i in 1:runs) {
+  for (i in seq_len(runs)) {
     km <- kmeans(data, centers = k, nstart = 100, iter.max = 1000)
     sil <- silhouette(km$cluster, dist(data))
     scores[i] <- mean(sil[, 3])
@@ -253,13 +297,13 @@ avg_silhouette <- function(k, data, runs = 100) {
   mean(scores)
 }
 
-# Run this for k = 2 to 10
-k_range <- 2:15
+# Evaluate silhouette across a range of K values (2:15)
+k_range <- 2:30
 avg_sil_scores <- sapply(
   k_range,
   avg_silhouette,
   data = topic_coords[, 1:40],
-  runs = 10
+  runs = 20
 )
 
 tibble(k = k_range, avg_silhouette = avg_sil_scores) %>%
@@ -300,7 +344,8 @@ for (k in c(2, 4)) {
     nstart = 100,
     iter.max = 1000
   )
-  # Add cluster info to data
+
+  # Add cluster assignment back to the topic_coords table
   topic_coords$cluster <- as.factor(kmeans_result$cluster)
 
   if (k == 4) {
@@ -310,16 +355,10 @@ for (k in c(2, 4)) {
     )
   }
 
-  if (k == 2) {
-    color_order <- c(5, 6)
-  } else {
-    # color_order <- c(5, 7, 3, 6)
-  }
-
   pca_plot <- topic_coords %>%
     mutate(
       label = if_else(
-        gamma > quantile(gamma, 0.4),
+        gamma > quantile(gamma, 0.5),
         str_wrap(label_beta, 20),
         topic
       )
@@ -341,7 +380,6 @@ for (k in c(2, 4)) {
         "Principal Component 2 (variance = {round(pca_var_explained[2] * 100, 2)}%)"
       )
     ) +
-    #  see::scale_color_oi(order = color_order) +
     scico::scale_color_scico_d(
       palette = "roma",
       direction = 1
@@ -393,10 +431,11 @@ for (k in c(2, 4)) {
   }
 }
 
-### Association heatmap between STM clusters and bibliographic clusters----------------
+
+#: Association heatmap between STM clusters and bibliographic clusters----------------
 alluvial <- read_rds(file.path(
   data_path,
-  glue("alluvial_round2_coupling_similarity_2_5_0.6.rds")
+  glue("alluvial_coupling_similarity_2_5_0.6_final.rds")
 ))
 alluvial[, citing_id := as.integer(citing_id)]
 
@@ -428,34 +467,34 @@ bibliographic_themes <- alluvial %>%
   left_join(community_names, by = "dynamic_cluster_leiden") %>%
   distinct(citing_id, extended_name)
 
+# Build contingency counts between STM clusters and bibliographic extended_name labels
 df_counts <- gamma %>%
   filter(gamma > 0.1) %>%
   left_join(select(topic_coords, label_beta, cluster), by = "label_beta") %>%
   left_join(select(metadata, document, citing_id = LLS_id), by = "document") %>%
-  left_join(bibliographic_themes, by = "citing_id") %>%
+  left_join(
+    bibliographic_themes,
+    by = "citing_id",
+    relationship = "many-to-many"
+  ) %>%
   filter(!is.na(extended_name)) %>%
   count(cluster, extended_name)
 
-# Total documents
+# Total documents and marginal totals used to compute expected counts under independence
 total_docs <- df_counts %>% summarise(total = sum(n)) %>% pull(total)
-
-# Marginal totals
 row_totals <- df_counts %>%
   group_by(extended_name) %>%
   summarise(row_sum = sum(n))
 col_totals <- df_counts %>% group_by(cluster) %>% summarise(col_sum = sum(n))
 
-# Merge and compute expected counts
 df_expected <- df_counts %>%
   left_join(row_totals, by = "extended_name") %>%
   left_join(col_totals, by = "cluster") %>%
   mutate(expected = (row_sum * col_sum) / total_docs, ratio = n / expected)
 
-# Log ratio for interpretability (positive: over-represented; negative: under)
-df_expected <- df_expected %>%
-  mutate(log_ratio = log2(ratio))
+# Log2 ratio is symmetric and intuitive: positive => over-represented; negative => under
+df_expected <- df_expected %>% mutate(log_ratio = log2(ratio))
 
-# Extended_name order (y-axis)
 extended_order <- c(
   "Emergence of novel protein and food innovation",
   "Socio-technological",
@@ -467,7 +506,6 @@ extended_order <- c(
 ) %>%
   str_wrap(., width = 25)
 
-# Set factor levels accordingly
 df_expected <- df_expected %>%
   mutate(
     extended_name = str_wrap(extended_name, width = 25),
@@ -480,7 +518,7 @@ ggplot(df_expected, aes(x = cluster, y = extended_name, fill = log_ratio)) +
   scico::scale_fill_scico(
     palette = "vik",
     midpoint = 0,
-    name = expression(log[2](Observed / Expected)), # This renders "log₂(Observed / Expected)"
+    name = expression(log[2](Observed / Expected)), # renders log2 ratio
     guide = guide_colorbar(barwidth = 20, barheight = 1.5)
   ) +
   labs(
@@ -509,8 +547,9 @@ ggsave(
   dpi = 300
 )
 
-# Running regressions---------------
 
+#: Topic effect estimation (regressions) ---------
+# Estimate how topics vary with covariates (here: year). This uses stm::estimateEffect
 formula_obj <- as.formula("~s(year)")
 
 estimate_effect <- estimateEffect(
@@ -521,11 +560,13 @@ estimate_effect <- estimateEffect(
   uncertainty = "Global",
   nsims = 25
 )
+
 write_rds(
   estimate_effect,
   here::here(data_path, "topic_modelling", "estimate_effect.rds")
 )
 
+# Extract tidy estimates for plotting (continuous covariate: year)
 tidyprep_year <- tidystm::extract.estimateEffect(
   estimate_effect,
   "year",

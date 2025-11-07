@@ -30,7 +30,7 @@ pacman::p_load(kableExtra,
 
 documents <- read_rds(file.path(data_path, "documents.rds"))
 direct_citations <- read_rds(file.path(data_path, "direct_citations.rds"))
-alluvial <- read_rds(file.path(data_path, glue("alluvial_round2_{params$method}_{params$threshold}_{params$window}_{params$resolution}.rds")))
+alluvial <- read_rds(file.path(data_path, "parameter_comparison_data", glue("alluvial_round2_{params$method}_{params$threshold}_{params$window}_{params$resolution}.rds")))
 alluvial[, citing_id := as.integer(citing_id)]
 
 # Loading topic modelling data data
