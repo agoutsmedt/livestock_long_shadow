@@ -1,6 +1,7 @@
 ---
-title: "Exploring thematic groups — attributes & networks"
+title: "Exploring thematic groups — attributes & network connectivity"
 format: html
+embed-resources: true
 execute:
   echo: false
   warning: false
