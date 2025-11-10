@@ -82,6 +82,14 @@ networks <- build_dynamic_networks(
     nb_terms_label = 5
   )
 
+saveRDS(
+  networks,
+  file.path(
+    data_path,
+    glue("networks_{method}_{threshold}_{window}_{resolution}_final.rds")
+  )
+)
+
 # Creating the alluvial
 cli::cli_alert_info("Creating alluvial")
 
@@ -92,19 +100,9 @@ alluvial <- networks %>%
   ) %>%
   left_join(community_names)
 
-
 alluvial <- alluvial %>%
-  select(-c(second_order_thematic_grouping, x5, extended_name)) %>%
+  select(-c(thematic_grouping, second_order_thematic_grouping, x5)) %>%
   mutate(cluster_label = str_c(dynamic_cluster_leiden, " - ", label))
-
-# Save for other uses
-write_rds(
-  alluvial,
-  file.path(
-    data_path,
-    glue("alluvial_{method}_{threshold}_{window}_{resolution}_final.rds")
-  )
-)
 
 # Preparing the plot
 
@@ -255,4 +253,24 @@ ggsave(
   width = 18,
   height = 14,
   dpi = 300
+)
+
+# Save for other uses
+alluvial_to_save <- alluvial_prepared_narrative %>%
+  select(
+    citing_id,
+    window,
+    dynamic_cluster_leiden,
+    label,
+    extended_name,
+    color,
+    y_alluv,
+    share_cluster_max
+  )
+write_rds(
+  alluvial_to_save,
+  file.path(
+    data_path,
+    glue("alluvial_{method}_{threshold}_{window}_{resolution}_final.rds")
+  )
 )

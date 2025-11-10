@@ -1,0 +1,246 @@
+---
+title: "Exploring thematic groups — attributes & networks"
+format: html
+execute:
+  echo: false
+  warning: false
+  error: true
+---
+
+## Abstract
+
+This report collects the figures produced by `scripts/exploring_thematic_groups_attribute.R` and documents, in accessible detail, the methods used to compute and visualise thematic-group attributes (geography, subject areas, journals) and network-derived connectivity (mixing matrices, cosine similarity, and silo indices).
+
+All figures shown below are produced by `scripts/exploring_thematic_groups_attribute.R` and helper utilities in `scripts/helper_functions.R`.
+
+The general goal is twofold:
+1. Provide a clear, reproducible pipeline for analysing thematic groups along multiple dimensions.
+2. Observe and document patterns of diversity and siloing among thematic groups in the bibliographic-coupling intertemporal communities.
+
+
+### Geographic distributions
+
+The following plots show the top contributors to each thematic group along geographic dimensions: regions and countries. Each bar shows the share of documents in that group associated with the given region/country; the point indicates the overall global share for that region/country across all groups. Consequently, bars taller than the point indicate over-representation in that group compared to the global baseline.
+
+#### Regions
+
+![](pictures/region_share_thematic_groups.png){fig-alt="Region share per group"}
+
+Caption: Top region contributors per thematic group with global share (point).
+
+#### Countries
+
+![](pictures/country_share_thematic_groups.png){fig-alt="Country share per group"}
+
+Caption: Top country contributors per thematic group with global share (point). Each document's contribution is split equally across multiple affiliations when present.
+
+
+### Subject areas and journals
+
+The following plots show the top subject areas and journals contributing to each thematic group. Each bar shows the share of documents in that group associated with the given subject/journal; the point indicates the overall global share for that subject/journal across all groups. Consequently, bars taller than the point indicate over-representation in that group compared to the global baseline.
+
+:::{.callout-note}
+The over-representation and under-representation patterns can help identify whether certain thematic groups are more globally distributed or concentrated in specific regions/countries. However, for subject areas and journals, the interpretation is more nuanced since some bibliographic communities are naturally aligned with specific fields or publication venues. Consequently, high concentration in certain subjects or journals may reflect the thematic focus rather than siloing per se, and we observe that most journals and subjects areas displayed over-representation for each thematic group.
+
+If we wanted to refine the analysis further, we could consider building a proper metric for over- and under-representation.
+:::
+
+#### Subject areas
+
+![](pictures/subject_share_thematic_groups.png){fig-alt="Subject share per group"}
+
+Caption: Top subject-area contributors per thematic group.
+
+#### Journals
+
+![](pictures/journal_share_thematic_groups.png){fig-alt="Journal share per group"}
+
+Caption: Top journals per thematic group.
+
+
+### Rank plots (diversity indicators)
+
+These plots compare thematic groups across diversity indicators (Shannon entropy, HHI) for each domain (country / subject / journal). See below for detailed definitions of these indicators.
+
+**Shannon entropy** measures diversity of contributions. It captures both richness (number of distinct levels) and evenness (how evenly share is spread). Higher values means a group's documents are spread more evenly across many levels (more diverse / less siloed); lower values indicates concentration on fewer levels (more siloed). Practical note: Shannon entropy is additive in information-theoretic terms but depends on the number of observed categories. Using the effective number of categories (Hill number: exp(H)) often gives a more intuitive “equivalent number of equally-common categories.”
+
+**Herfindahl-Hirschman Index (HHI)** emphasises dominance because shares are squared. High HHI signals that one or a few categories dominate the group (strong siloing). Low HHI indicates a more even spread. HHI ranges between 1/k (equal shares across k categories) and 1 (complete concentration).
+
+Both indicators are useful for understanding how thematic groups distribute their contributions across different dimensions. They differ in many ways: 
+
+- Sensitivity: Shannon is sensitive to both richness and evenness; HHI is more sensitive to dominance by the largest categories. A distribution with many small categories plus one moderately large category may have moderate Shannon entropy but high HHI.
+- Intuition: Shannon measures overall uncertainty or information content of the distribution; HHI measures concentration (dominance) directly.
+- Scale: Shannon grows with number of effective categories (use exp(H) for an intuitive count); HHI is bounded by [1/k, 1] and often easier to map to concentration.
+
+The plots below show thematic groups ranked by each indicator for each domain. Lines connect ranks across indicators to highlight consistent patterns. Bottom ranks indicate more siloing (lower Shannon, higher HHI).
+
+
+![](pictures/thematic_group_rank_by_country_indicators.png){fig-alt="Rank plot country indicators"}
+
+![](pictures/thematic_group_rank_by_subject_indicators.png){fig-alt="Rank plot subject indicators"}
+
+![](pictures/thematic_group_rank_by_journal_indicators.png){fig-alt="Rank plot journal indicators"}
+
+
+### Silo indices (combined)
+
+We create composite silo indices by averaging the per-domain indicators (Shannon and HHI) after rescaling them so that higher values indicate more siloing. Specifically, we invert Shannon (1 - rescaled Shannon) and rescale HHI to [0,1] before averaging across domains. A higher composite silo index indicates that a thematic group is more siloed across the considered dimensions.
+
+![](pictures/silo_indices_facet_by_indicator.png){fig-alt="Silo indices by indicator"}
+
+Caption: Composite silo indices (averages across domains) shown for each group. Shannon metrics are inverted so higher values indicate more siloing.
+
+
+### Network-derived heatmaps
+
+The following heatmaps visualise the aggregated connectivity patterns between thematic groups based on bibliographic-coupling networks. 
+
+
+#### Aggregated mixing matrix (normalized)
+
+The **mixing matrix** shows how strongly each group connects to every other group. For each time window, it calculates the total bibliographic-coupling weight from documents in one group to documents in another, symmetrises the matrix to treat connections as undirected, and then row-normalises it so that each row sums to 1. This normalisation allows us to see, for each group, the distribution of its connections to other groups. Then, we aggregate these matrices across all time windows by averaging. In the resulting heatmap, darker cells indicate stronger connections from the row-group to the column-group. 
+
+The diagonal cells show within-group connectivity, while off-diagonal cells reveal cross-group connections. A darker cell in the diagonal suggests that groups tend to cite within themselves, indicating siloing. Darker cells off the diagonal indicate stronger cross-group interactions.
+
+![](pictures/aggregated_mixing_matrix_heatmap.png){fig-alt="Aggregated mixing matrix heatmap"}
+
+Caption: Row-normalised mixing matrix aggregated across bibliographic-coupling networks; brighter cells indicate stronger connections from the row-group to the column-group.
+
+#### Aggregated cosine similarity
+
+
+The **cosine similarity matrix** measures how similar the connection profiles of different groups are. For each time window, it computes the cosine similarity between the row vectors of the symmetrised mixing matrix. This similarity quantifies whether two groups connect to other groups in similar patterns, regardless of the absolute strength of their connections. We then aggregate these cosine similarity matrices across all time windows by averaging. In the resulting heatmap, darker cells indicate higher cosine similarity between the connection profiles of the corresponding groups. Here, diagonal cells are always 1 (a group is perfectly similar to itself), while off-diagonal cells reveal which groups have similar patterns of connections to other groups.
+
+![](pictures/aggregated_cosine_similarity_heatmap.png){fig-alt="Aggregated cosine similarity heatmap"}
+
+Caption: Cosine similarity between group connection profiles (higher = more similar patterns of connections to other groups).
+
+#### Average 
+
+Based on network connectivity, we compute the average fraction of within-group connections for each thematic group. This metric indicates how much a group's documents tend to cite other documents within the same group versus citing documents from different groups. A higher fraction suggests stronger internal connectivity and potential siloing, while a lower fraction indicates more cross-group interactions.
+
+![](pictures/fraction_within_group_connections.png){fig-alt="Average fraction of within-group connections"}
+
+
+## Methods — data and processing (pedagogical)
+
+This section explains the data sources and computational steps in plain terms, alongside concise mathematical definitions. The code implementation lives in `scripts/exploring_thematic_groups_attribute.R` and `scripts/helper_functions.R` (the latter provides `compute_group_stats()`, `diversity_metrics()`, `aggregate_networks()` and plotting helpers). The explanations below match the implementation and include the rationale behind key choices.
+
+### 1) Data inputs
+
+- Alluvial mapping: a table that assigns each citing document (`citing_id`) to a thematic group (`extended_name`). Some documents may be missing group labels and are removed early.
+- Document metadata: per-document fields including Scopus EIDs (`scopus_eid`), subject areas (`subject_areas`), and `journal` names.
+- Affiliations: a table mapping Scopus EIDs to affiliation countries. Documents with multiple affiliations are handled by splitting contribution equally across those affiliations.
+- Networks: a list of precomputed bibliographic-coupling networks (tidygraph / igraph-compatible). Each network contains nodes labelled by `citing_id` and edges whose weights reflect bibliographic coupling strength for a time window / threshold.
+
+Why split document weights? When a document lists multiple affiliations or subject areas, attributing it fully to a single country or subject would overcount. Splitting (equal fractional contribution) is simple, reproducible, and interpretable.
+
+
+### 2) Group-level distributions (function: compute_group_stats)
+
+Goal: for a given categorical level (country, region, subject_area, journal) compute how much each thematic group is composed by each level, and compute global baseline shares across all groups.
+
+High-level algorithm:
+
+1. Remove rows where the level value is missing or empty.
+2. For each document (`citing_id`) compute a per-row share: share = 1 / (# rows for that citing_id). This fraction splits the document equally across multiple affiliations / subjects.
+3. Sum these shares by (extended_name, level) to obtain `group_weight`.
+4. Sum `group_weight` per `extended_name` to obtain `group_total`.
+5. Compute `group_share = group_weight / group_total` (the fraction of a group's documents associated with that level).
+6. Sum shares across all groups by level to get `global_weight`, then `global_share = global_weight / sum(global_weight)`.
+
+Output columns: `extended_name`, `level`, `group_weight`, `group_total`, `group_share`, `global_weight`, `global_share`.
+
+Interpretation: `group_share` lets you see which countries/subjects/journals dominate a particular thematic group; `global_share` provides the overall baseline to be shown as a point on the group bar plots.
+
+
+### 3) Diversity metrics (function: diversity_metrics)
+
+Purpose: summarise how concentrated or diverse a group's composition is across levels.
+
+For each group we compute three related metrics from the group's per-level shares p_i:
+
+- Shannon entropy H:
+
+$$
+H = - \sum_i p_i \log(p_i)
+$$
+
+(Implementation detail: a tiny epsilon is added to p_i when computing `log` to avoid log(0) numerical problems.)
+
+- Normalized Shannon:
+
+$$
+H_{norm} = \frac{H}{\log(k)}
+$$
+
+where k is the number of distinct observed levels for the group. If k <= 1 the normalized Shannon is set to 0 (maximally concentrated).
+
+- Herfindahl–Hirschman Index (HHI):
+
+$$
+HHI = \sum_i p_i^2
+$$
+
+HHI ranges from 1/k (equal shares) to 1 (complete concentration). For interpretability across domains we rescale HHI into [0,1] when combining indicators.
+
+Notes on interpretation:
+
+- Lower Shannon (or higher inverted Shannon) indicates more siloing (concentration on fewer countries/subjects/journals).
+- HHI emphasizes dominant categories (it is quadratic in p_i) and is sensitive to presence of a single dominant level.
+
+
+Weaknesses and caveats (both metrics):
+
+- Dependence on category resolution: Both metrics change if you split or merge categories (taxonomy choice matters).
+- Small-sample bias: Estimates can be unstable for groups with few documents; consider minimum counts or bootstrap CIs.
+- Sensitivity to rare categories: Shannon gives more weight to rare categories than HHI; rare noise can inflate H.
+- Ignoring similarity between categories: Neither metric accounts for similarity or hierarchical relationships among categories (e.g., related subjects or neighbouring countries).
+- Compositional effects: Fractional splitting of multi-affiliated documents changes p_i and can bias comparisons if splitting rules differ by domain.
+- Comparability: Raw values depend on the number of observed categories; use normalized Shannon or rescale HHI (as done elsewhere in this report) when combining indicators across domains.
+
+
+### 4) Composite silo indices
+
+To provide an overall view of group siloing, the pipeline rescales the per-domain indicators so higher values indicate more siloing and then averages across domains.
+
+Specifically:
+
+- Invert Shannon so that larger values mean more siloing: 1 - rescale(shannon) with rescale to [0,1].
+- Rescale HHI to [0,1] via `scales::rescale()`.
+- Compute per-group means across the three domains (country, subject, journal), ignoring missing domains (na.rm = TRUE).
+
+This simple average gives composite `silo_shannon` and `silo_hhi` indices. These are useful summary metrics but should be reported alongside domain-specific metrics for transparency.
+
+
+### 5) Network analysis and group connectivity
+
+Input: a bibliographic-coupling network where each node is a document and nodes are annotated with `extended_name` (the thematic group). Edges have weights (coupling strength). The analysis proceeds per network window and then aggregates across windows.
+
+Per-graph steps (function: compute_group_connectivity):
+
+1. If needed, set missing edge weights to 1 (unweighted fallback).
+2. For every edge, determine the group label of its endpoints (from node attributes).
+3. Aggregate edge weights by (from_group, to_group) to build a group-by-group weight matrix W.
+4. Symmetrize W to produce an undirected view: $W_{sym} = (W + t(W)) / 2$ (so within-group and between-group contributions are comparable).
+5. Compute a row-normalised mixing matrix P where each row sums to 1: $P[row, :] = W_{sym}[row, :] / \sum(W_{sym}[row, :])$. Rows with zero total remain zero.
+6. Group summaries: total weight (row sum), within_weight (diagonal element), between_weight = total - within. Fraction within = within/total, conductance = between/total (or related measure).
+7. Cosine similarity: for each pair of groups compute cosine similarity between their (symmetrized) connection profiles. This quantifies whether two groups connect to other groups in similar patterns.
+
+Aggregation across networks (function: aggregate_networks):
+
+- Combine per-window mixing matrices and cosine matrices using either simple averaging or weighted aggregation (the script uses `weight_by = "none"` meaning equal weighting). This yields `aggregated_stats$mixing_norm` and `aggregated_stats$cosine` that are visualised as heatmaps.
+
+Interpretation:
+
+- The mixing matrix shows where groups link: diagonal dominance means groups link internally; off-diagonals show cross-group coupling.
+- Cosine similarity measures if two groups have similar connection fingerprints, which can reveal groups that are similar in how they embed into the literature network even if they don't link strongly to each other directly.
+
+
+### 6) Plotting choices
+
+- Faceted bar plots (per group) show `group_share` for top-N levels and overlay `global_share` as a point to indicate baseline prevalence.
+- Rank plots connect group ranks across several indicators so one can see consistent winners/losers across metrics.
+- Heatmaps use row or symmetric clustering to highlight block structure and similarity.
+- Color & labelling: group colors and wrapped labels are chosen for readability; `ggtext::element_markdown()` is used so some group names are deliberately bolded in labels for emphasis.
+
