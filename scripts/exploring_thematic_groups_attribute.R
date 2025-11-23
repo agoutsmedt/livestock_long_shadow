@@ -27,6 +27,8 @@
 # - Comments explain why blocks exist; follow them to adapt safely.
 
 source("scripts/paths_and_packages.R")
+source("scripts/helper_functions.R")
+p_load(patchwork)
 
 #: Data loading & initial cleaning ---------
 # Load mapping of documents -> thematic groups (alluvial coupling file).
@@ -257,16 +259,17 @@ region_plot <- plot_group_shares(
   wrap_width = 30,
   filename = "region_share_thematic_groups.png",
   figures_path = figures_path,
-  base_size = 20,
+  base_size = 15,
   plot_height = 12
 )
 country_plot <- plot_group_shares(
   filter(geo_stats, geo_type == "country"),
-  top_n = 6,
+  top_n = 5,
   wrap_width = 30,
+  plot_title = NULL,
   filename = "country_share_thematic_groups.png",
   figures_path = figures_path,
-  base_size = 18,
+  base_size = 14,
   plot_height = 12
 )
 
@@ -285,10 +288,11 @@ subject_stats <- compute_group_stats(
 subject_plot <- plot_group_shares(
   subject_stats,
   top_n = 5,
-  wrap_width = 30,
+  wrap_width = 38,
+  plot_title = NULL,
   filename = "subject_share_thematic_groups.png",
   figures_path = figures_path,
-  base_size = 17,
+  base_size = 14,
   plot_height = 12
 )
 
@@ -307,12 +311,35 @@ journal_stats <- compute_group_stats(communities_journal, level_col = "journal")
 journal_plot <- plot_group_shares(
   journal_stats,
   top_n = 5,
-  wrap_width = 35,
+  wrap_width = 48,
+  plot_title = NULL,
   filename = "journal_share_thematic_groups.png",
   figures_path = figures_path,
-  base_size = 16,
+  base_size = 14,
   plot_height = 12
 )
+
+# Common plotting
+
+full_plot <- country_plot /
+  journal_plot /
+  subject_plot +
+  patchwork::plot_layout(heights = c(0.9, 1.1, 1))
+ggsave(
+  file.path(figures_path, "thematic_groups_geography_journals_subjects.png"),
+  plot = full_plot,
+  width = 16,
+  height = 22,
+  dpi = 300
+)
+ggsave(
+  file.path(figures_path, "figure-2.png"),
+  plot = full_plot,
+  width = 16,
+  height = 22,
+  dpi = 300
+)
+
 
 #: Exploring thematic group diversity ------------------
 
@@ -468,7 +495,7 @@ p_silo_facet <- silo_long |>
   scale_y_reordered() +
   coord_cartesian(clip = "off") +
   labs(
-    title = "Silo indices by indicator and thematic group",
+    title = NULL,
     x = "Silo index (0 = open -> 1 = siloed)",
     y = NULL,
     caption = "Shannon metrics inverted so higher values indicate more siloing"
@@ -482,6 +509,13 @@ ggsave(
   height = 12,
   dpi = 300
 )
+ggsave(
+  file.path(figures_path, "figure-7.png"),
+  plot = p_silo_facet,
+  width = 16,
+  height = 12,
+  dpi = 300
+)
 
 #: Testing silo effects based on bibliographic coupling ---------
 
@@ -489,25 +523,41 @@ ggsave(
 # precomputed group-level statistics, typically produced by `compute_group_connectivity()`.
 # Example shape: `network_stats[[i]]$mixing_matrix`, `network_stats[[i]]$cosine`.
 
-# Aggregate network-level statistics across time windows / thresholds.
-aggregated_stats <- aggregate_networks(
-  network_stats,
-  weight_by = "none"
+# Apply to your list of networks
+network_stats <- map(
+  networks_list,
+  compute_group_connectivity,
+  node_attr = "extended_name",
+  weight_attr = "weight"
 )
+
+aggregated_networks <- aggregate_networks(
+  network_stats,
+  weight_by = "network_weight"
+)
+
+# Normalize at the row level the matrix to have aggregated proportion:
+total_weights <- map_dbl(
+  1:dim(aggregated_networks$mixing_norm)[1],
+  ~ sum(aggregated_networks$mixing_norm[.x, ])
+)
+overall_mixing_matrix <- aggregated_networks$mixing_norm / total_weights
 
 # Mixing matrix heatmap: visualise normalized mixing between groups.
 p_mixing <- plot_heatmap(
-  mat = aggregated_stats$mixing_norm,
-  title = "Aggregated Mixing Matrix (Normalized)",
+  mat = overall_mixing_matrix,
+  title = NULL,
   fill_label = "Normalized Weight",
   figures_path = figures_path,
   filename = "aggregated_mixing_matrix_heatmap.png",
-  wrap_width = 18
+  wrap_width = 16
 )
 
 # Save mixing heatmap (helpers return ggplot objects; we explicitly save to
 # ensure files exist even if helper also saved them).
-file_path <- file.path(figures_path, "aggregated_mixing_matrix_heatmap.png")
+#file_path <- file.path(figures_path, "aggregated_mixing_matrix_heatmap.png")
+file_path <- file.path(figures_path, "figure-8.png")
+
 ggplot2::ggsave(
   filename = file_path,
   plot = p_mixing,

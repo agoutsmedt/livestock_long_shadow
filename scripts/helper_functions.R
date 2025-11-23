@@ -1024,6 +1024,7 @@ plot_group_shares <- function(
   wrap_width = 30,
   filename,
   figures_path,
+  plot_title = NULL,
   base_size = 18,
   facet_order = extended_order,
   ncol = 2,
@@ -1089,8 +1090,10 @@ plot_group_shares <- function(
     ) +
     ggplot2::guides(fill = "none", color = "none") +
     ggplot2::labs(
-      x = "Share of articles in the thematic group (bar) vs global share (point)",
-      y = NULL
+      #    x = "Share of articles in the thematic group (bar) vs global share (point)",
+      x = NULL,
+      y = NULL,
+      title = plot_title
     ) +
     # Percent-formatted x axis
     ggplot2::scale_x_continuous(
@@ -1599,15 +1602,6 @@ compute_group_connectivity <- function(
   list(P = P, group_summary = group_summary, cosine_similarity = sim)
 }
 
-# Apply to your list of networks
-network_stats <- map(
-  networks,
-  compute_group_connectivity,
-  node_attr = "extended_name",
-  weight_attr = "weight"
-)
-
-
 #' Aggregate network-level mixing, similarity, and group summaries
 #'
 #' Summarize a list of network statistics into three aggregated outputs:
@@ -1929,7 +1923,7 @@ aggregate_networks <- function(
 #' @export
 plot_heatmap <- function(
   mat,
-  title,
+  title = NULL,
   fill_label,
   figures_path,
   filename,
@@ -1990,7 +1984,7 @@ plot_heatmap <- function(
     )
 
   # mimic theme_minimal with ggtext + larger base size
-  base_size <- 16
+  base_size <- 18
 
   p <- ggplot2::ggplot(
     mat_melt,
